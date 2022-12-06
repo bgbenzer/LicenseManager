@@ -31,29 +31,33 @@ public class LicenseManager {
         ServerSocket serverSocket = new ServerSocket(5000);
         Socket socket = serverSocket.accept();
 
-        System.out.println("Client is connecting");
+        System.out.println("Server -- Server is being requested...");
 
+        //Get encrypted message from client
         DataInputStream dataInputStream = new DataInputStream(socket.getInputStream());
         int length = dataInputStream.readInt();
         byte[] encryptedMessageBytes = new byte[length];
         dataInputStream.readFully(encryptedMessageBytes,0, encryptedMessageBytes.length);
+        String stringEncryptedMessageBytes = new String(encryptedMessageBytes);
+        System.out.println("Server -- Incoming Encrypted Text: " + stringEncryptedMessageBytes);
 
+        //Decrypt client encrypted message
         String finALE = licenseManager.decrypt(encryptedMessageBytes);
+        System.out.println("Server -- Decrypted Text: " + finALE);
 
+        //Hash decrypted message for send client
         String hash = licenseManager.md5Hash(finALE);
+        System.out.println("Server -- MD5 Plain License Text: " + hash);
 
-        System.out.println(hash);
-
+        //Sign hashed message
         byte[] signedMessageBytes = licenseManager.sign(hash);
+        String stringSignedMessageBytes = new String(signedMessageBytes);
+        System.out.println("Server -- Digital Signature: " + stringSignedMessageBytes);
 
+        //Send signed message to client
         DataOutputStream dataOutputStream = new DataOutputStream(socket.getOutputStream());
         dataOutputStream.writeInt(signedMessageBytes.length);
         dataOutputStream.write(signedMessageBytes);
-
-
-//        String[] data = finALE.split("\\$");
-
-
     }
 
 
@@ -86,7 +90,7 @@ public class LicenseManager {
         return signedMessageBytes;
     }
 
-    public String md5Hash(String finALE) throws NoSuchAlgorithmException {
+    public static String md5Hash(String finALE) throws NoSuchAlgorithmException {
         MessageDigest md = MessageDigest.getInstance("MD5");
         md.update(finALE.getBytes());
         byte[] digest = md.digest();

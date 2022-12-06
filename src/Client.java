@@ -2,7 +2,6 @@ import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
-import javax.xml.bind.DatatypeConverter;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
@@ -11,7 +10,6 @@ import java.nio.file.Paths;
 import java.security.*;
 import java.security.spec.EncodedKeySpec;
 import java.security.spec.InvalidKeySpecException;
-import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 
 public class Client {
@@ -40,21 +38,59 @@ public class Client {
     public static void main(String[] args) throws IOException, NoSuchPaddingException, NoSuchAlgorithmException, InvalidKeySpecException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
 
         Client client = new Client();
+        System.out.println("Client started...");
+        client.setMACAddress(client.getMacAddress()); // MAC ADDRESS
+        System.out.println("My MAC: "+ client.getMACAddress());
 
-        String[] fileContent = readFile("license.txt");
+        client.setDiskSerialNumber(client.getDiskSerialNumber());
+        System.out.println("My Disk ID: "+ client.getDiskSN());
+
+        client.setMotherboardSerialNumber(client.getMotherboardSerialNumber());
+        System.out.println("My Motherboard ID: "+ client.getMotherboardSN());
+
+        //LicenseManager licenseManager = new LicenseManager();
+        System.out.println("LicenseManager service started...");
+
+        byte[] fileContent = readAsByte("license.txt");
+
         if(fileContent != null){
+            //Take public key for decrypt license.txt
+            File publicKeyFile = new File("public.key");
+            byte[] publicKeyBytes = Files.readAllBytes(publicKeyFile.toPath());
+
+            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+            EncodedKeySpec publicKeySpec = new X509EncodedKeySpec(publicKeyBytes);
+
+            Cipher encryptCipher2 = Cipher.getInstance("RSA");
+            encryptCipher2.init(Cipher.DECRYPT_MODE, keyFactory.generatePublic(publicKeySpec));
+            byte[] decryptedMessageBytes = encryptCipher2.doFinal(fileContent);
+            String decryptedLicenseText = new String(decryptedMessageBytes);
+            System.out.println("Client -- License file is found.");
+
+            //Create rawLicenseText for comparing with license.txt
+            String rawLicenseText = client.getUserName()+"$"+client.getSerialNumber()+"$"+client.getMACAddress()+"$"+client.getDiskSN()+"$"+client.getMotherboardSN();
+            System.out.println("Client -- Raw License Text: " + rawLicenseText);
+
+            //MD5 Hashing for raw license text
+            String rawLicenseTextHash = LicenseManager.md5Hash(rawLicenseText);
+            System.out.println("Client -- MD5 License Text: " + rawLicenseTextHash);
+
+            //Compare client hash data with server hash data
+            if(rawLicenseTextHash.equals(decryptedLicenseText)) {
+                System.out.println("Client -- Succeed. The license is correct.");
+            }
+            else {
+                System.out.println("Client -- The license file has been broken!!");
+            }
 
         }else{
-            System.out.println("===========================================");
-//            System.out.println("USTAM O DOSYA HAKKIN RAHMETİNE KAVUŞMUŞ");
-            client.setMACAddress(client.getMacAddress()); // MAC ADDRESS
-//            System.out.println("My Mac Address: "+ client.getMACAddress());
-            client.setDiskSerialNumber(client.getDiskSerialNumber());
-//            System.out.println("My Disk Serial Number: "+ client.getDiskSN());
-            client.setMotherboardSerialNumber(client.getMotherboardSerialNumber());
-//            System.out.println("My Motherboard Serial Number: "+ client.getMotherboardSN());
-            String concatVersion = client.getUserName()+"$"+client.getSerialNumber()+"$"+client.getMACAddress()+"$"+client.getDiskSN()+"$"+client.getMotherboardSN();
+            System.out.println("Client -- License file is not found.");
 
+            //Create rawLicenseText
+            String rawLicenseText = client.getUserName()+"$"+client.getSerialNumber()+"$"+client.getMACAddress()+"$"+client.getDiskSN()+"$"+client.getMotherboardSN();
+            System.out.println("Client -- Raw License Text: " + rawLicenseText);
+
+            //Take public key at public.key
             File publicKeyFile = new File("public.key");
             byte[] publicKeyBytes = Files.readAllBytes(publicKeyFile.toPath());
 
@@ -64,43 +100,46 @@ public class Client {
             Cipher encryptCipher = Cipher.getInstance("RSA");
             encryptCipher.init(Cipher.ENCRYPT_MODE, keyFactory.generatePublic(publicKeySpec));
 
-            byte[] secretMessageBytes = concatVersion.getBytes(StandardCharsets.UTF_8);
+            //Encrypt raw license text for send server
+            byte[] secretMessageBytes = rawLicenseText.getBytes(StandardCharsets.UTF_8);
             byte[] encryptedMessageBytes = encryptCipher.doFinal(secretMessageBytes);
+            String encryptedLicenseText = new String(encryptedMessageBytes);
+            System.out.println("Client -- Encrypted License Text: " + encryptedLicenseText);
 
+            //Create raw license text hash for compare server response
+            String rawLicenseTextHash = LicenseManager.md5Hash(rawLicenseText);
+            System.out.println("Client -- MD5 License Text: " + rawLicenseTextHash);
 
+            //Send encrypted data to server with socket
             Socket socket = new Socket("localhost", 5000);
             DataOutputStream dataOutputStream = new DataOutputStream(socket.getOutputStream());
             dataOutputStream.writeInt(encryptedMessageBytes.length);
             dataOutputStream.write(encryptedMessageBytes);
 
-//            ServerSocket serverSocket = new ServerSocket(5000);
-//            Socket socket2 = serverSocket.accept();
 
+            //Get signed message which server response
             DataInputStream dataInputStream = new DataInputStream(socket.getInputStream());
             int length = dataInputStream.readInt();
             byte[] signedMessageBytes = new byte[length];
             dataInputStream.readFully(signedMessageBytes,0, encryptedMessageBytes.length);
 
-//            String hash = new String(signedMessageBytes);
-//            System.out.println(hash);
+            System.out.println("Client -- License is not found.");
 
             KeyFactory keyFactory2 = KeyFactory.getInstance("RSA");
             EncodedKeySpec publicKeySpec2 = new X509EncodedKeySpec(publicKeyBytes);
 
+            //Decrypt signed message for compare two hash datas
             Cipher encryptCipher2 = Cipher.getInstance("RSA");
             encryptCipher2.init(Cipher.DECRYPT_MODE, keyFactory2.generatePublic(publicKeySpec2));
             byte[] decryptedMessageBytes = encryptCipher2.doFinal(signedMessageBytes);
             String stringHash = new String(decryptedMessageBytes);
-            System.out.println(stringHash);
 
-
+            //Compare client hash data with server hash data
+            if(rawLicenseTextHash.equals(stringHash)) {
+                writeToFile(signedMessageBytes, "license.txt");
+                System.out.println("Client -- Succeed. The license file content is secured and signed by the server.");
+            }
         }
-
-
-
-
-
-
         //1)license.txt var mı bak
         //2)varsa public key ile very et
         //3)licensemanager hem public hem private key tutuyor, client sadece public tutuyor
@@ -121,7 +160,6 @@ public class Client {
 
         //clientta public key ile hardware datasının hashini alıpkontrol et
         //eğer licensemanager'dan geliyorsa license.txt'ye bas
-
     }
 
     public String getMotherboardSerialNumber() {
@@ -220,28 +258,25 @@ public class Client {
 
     }
 
-    public static void writeToFile(String str1, String outputFile){
+    public static void writeToFile(byte[] str1, String outputFile){
 
         File file = new File(outputFile);
-
-        try{
-
-            file.createNewFile();
-            FileWriter writer = new FileWriter(outputFile,true);
-
-            writer.write(str1);
-            writer.write("\n");
-
-            writer.close();
+        try (FileOutputStream outputStream = new FileOutputStream(file)) {
+            outputStream.write(str1);
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(e);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
-        catch(IOException e){
-            System.out.println("error");
-        }
-
     }
-    public static byte[] readAsByte(String fileName) throws IOException {
-        byte[] bytes = Files.readAllBytes(Paths.get(fileName));
-        return bytes;
+    public static byte[] readAsByte(String fileName) {
+        try {
+            byte[] bytes = Files.readAllBytes(Paths.get(fileName));
+            return bytes;
+        }
+        catch (IOException e) {
+            return null;
+        }
     }
 
 
